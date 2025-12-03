@@ -1,0 +1,50 @@
+model Option {
+  id               String   @id @default(uuid())
+  name             String
+  description      String
+  amount           Float
+  code             String   @unique
+  isActive         Boolean  @default(true)
+  stripeProductId  String?  @unique
+  stripePriceId    String?  @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  packOptions PackOption[]
+
+  @@map("options")
+}
+
+model Pack {
+  id               String   @id @default(uuid())
+  name             String
+  description      String
+  amount           Float
+  code             String   @unique
+  isActive         Boolean  @default(true)
+  stripeProductId  String?  @unique
+  stripePriceId    String?  @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  packOptions PackOption[]
+
+  @@map("packs")
+}
+
+model PackOption {
+  id       String @id @default(uuid())
+  packId   String
+  optionId String
+  quantity Int    @default(1)
+
+  // Relations
+  pack   Pack   @relation(fields: [packId], references: [id], onDelete: Cascade)
+  option Option @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@unique([packId, optionId])
+  @@map("pack_options")
+}
+

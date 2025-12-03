@@ -1,0 +1,25 @@
+model CandidateJobPreference {
+  id              String            @id @default(uuid())
+  name            String?                // Nom généré par IA pour identifier la candidature
+  desiredPosition String
+  jobDescription  String?
+  experience      ExperienceLevel?
+  workMode        WorkMode?
+  formalityLevel  FormalityLevel?
+  isActive        Boolean           @default(false)  // Indique quelle candidature est active
+
+  // Relation vers le candidat (1 Candidat -> N JobPreference)
+  candidateId     String
+  candidate       Candidate       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  // Chaque job preference a son propre CV
+  cvId            String?
+  cv              AppFile?          @relation(fields: [cvId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([candidateId])
+  @@index([cvId])
+  @@map("candidate_job_preferences")
+}

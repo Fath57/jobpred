@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  api:
+    container_name: jobprep-api-development
+    environment:
+      - NODE_ENV=development
+      - PORT=3050
+      - LOG_LEVEL=debug
+      - ENABLE_DEBUG=true
+    ports:
+      - "${PORT}:${PORT}"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: sh -c "npm run db:build:schema && npx prisma generate --schema=prisma/schema.prisma && npm run start:${START_COMMAND:-dev}"

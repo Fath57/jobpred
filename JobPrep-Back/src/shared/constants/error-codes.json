@@ -1,0 +1,48 @@
+{
+  "COMMON": {
+    "INTERNAL_SERVER_ERROR": {
+      "code": "COMMON_001",
+      "message": "Internal server error"
+    },
+    "BAD_REQUEST": {
+      "code": "COMMON_002",
+      "message": "Bad request"
+    },
+    "NOT_FOUND": {
+      "code": "COMMON_003",
+      "message": "Resource not found"
+    }
+  },
+  "USER": {
+    "EMAIL_EXISTS": {
+      "code": "USER_001",
+      "message": "User with this email already exists"
+    },
+    "NOT_FOUND": {
+      "code": "USER_002",
+      "message": "User not found"
+    },
+    "INVALID_CREDENTIALS": {
+      "code": "USER_003",
+      "message": "Invalid email or password"
+    },
+    "UNAUTHORIZED": {
+      "code": "USER_004",
+      "message": "Unauthorized access"
+    }
+  },
+  "AUTH": {
+    "INVALID_TOKEN": {
+      "code": "AUTH_001",
+      "message": "Invalid token"
+    },
+    "TOKEN_EXPIRED": {
+      "code": "AUTH_002",
+      "message": "Token has expired"
+    },
+    "NO_TOKEN": {
+      "code": "AUTH_003",
+      "message": "No authorization token provided"
+    }
+  }
+}

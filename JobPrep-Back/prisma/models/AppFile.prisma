@@ -1,0 +1,16 @@
+model AppFile {
+  id         String   @id @default(cuid())
+
+  // Champs demandés
+  name       String        
+  extension  String        
+  size       BigInt        
+  path       String  @unique  
+  url        String?        
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  candidates Candidate[]
+  @@map("app_files")
+}

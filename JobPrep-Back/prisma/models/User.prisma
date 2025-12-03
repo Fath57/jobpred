@@ -1,0 +1,21 @@
+model User {
+  id                String             @id @default(uuid())
+  email             String             @unique
+  password          String
+  firstName         String
+  lastName          String
+  phone             String?
+  location          String?
+  isActive          Boolean            @default(true)
+  roleId            String
+  lastLoginAt       DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  linkedin          String?
+  candidate         Candidate?
+  onboardingSession OnboardingSession?
+  onboardingStep    Int               @default(1)
+  role              Role               @relation(fields: [roleId], references: [id])
+
+  @@map("users")
+}

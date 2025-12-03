@@ -1,0 +1,555 @@
+pipeline {
+    agent any
+
+    environment {
+        // Auto-detect environment from branch
+        ENV_NAME = "${env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' || env.BRANCH_NAME == 'production' ? 'production' : 'development'}"
+        IS_PRODUCTION = "${env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' || env.BRANCH_NAME == 'production' ? 'true' : 'false'}"
+
+        // Deployment paths
+        DEPLOY_BASE = "/var/www/jobprep"
+        DEPLOY_PATH = "${DEPLOY_BASE}/${ENV_NAME}"
+        APP_PATH = "${DEPLOY_PATH}/app"
+
+        // Docker Compose files
+        COMPOSE_FILES = "${IS_PRODUCTION == 'true' ? 'docker-compose.yml -f docker-compose.production.yml' : 'docker-compose.yml -f docker-compose.development.yml'}"
+        ENV_FILE = "${IS_PRODUCTION == 'true' ? '.env.production' : '.env.development'}"
+    }
+
+    triggers {
+        pollSCM('H/5 * * * *')
+    }
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        skipStagesAfterUnstable()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
+    }
+
+    stages {
+        stage('📋 Deployment Info') {
+            steps {
+                script {
+                    echo """
+                    ╔════════════════════════════════════════╗
+                    ║     🚀 DEPLOYMENT STARTING            ║
+                    ╚════════════════════════════════════════╝
+
+                    Environment: ${ENV_NAME.toUpperCase()}
+                    Branch: ${env.BRANCH_NAME}
+                    Build: #${env.BUILD_NUMBER}
+                    Deploy Path: ${APP_PATH}
+                    Workspace: ${WORKSPACE}
+                    Compose Files: ${COMPOSE_FILES}
+                    Env File: ${ENV_FILE}
+
+                    ════════════════════════════════════════
+                    """
+                }
+            }
+        }
+
+        stage('📥 Checkout Code') {
+            steps {
+                script {
+                    echo "🔄 Checking out code from repository..."
+
+                    // Clean workspace before checkout
+                    cleanWs()
+
+                    // Checkout code from SCM
+                    checkout scm
+
+                    echo "✅ Code checked out successfully"
+
+                    // Verify important files exist
+                    sh """
+                        echo ""
+                        echo "📂 Verifying repository structure..."
+
+                        if [ -f "docker-compose.yml" ]; then
+                            echo "✅ docker-compose.yml found"
+                        else
+                            echo "❌ docker-compose.yml NOT found"
+                            exit 1
+                        fi
+
+                        if [ -f "docker-compose.${ENV_NAME}.yml" ]; then
+                            echo "✅ docker-compose.${ENV_NAME}.yml found"
+                        else
+                            echo "❌ docker-compose.${ENV_NAME}.yml NOT found"
+                            exit 1
+                        fi
+
+                        if [ -f "${ENV_FILE}" ]; then
+                            echo "✅ ${ENV_FILE} found"
+                        else
+                            echo "❌ ${ENV_FILE} NOT found"
+                            exit 1
+                        fi
+
+                        echo ""
+                        echo "📊 Repository contents:"
+                        ls -lah
+                    """
+                }
+            }
+        }
+
+        stage('⚠️  Production Approval') {
+            when {
+                expression { IS_PRODUCTION == 'true' }
+            }
+            steps {
+                timeout(time: 10, unit: 'MINUTES') {
+                    input message: "🚀 Deploy to PRODUCTION?",
+                          ok: "Deploy Now",
+                          submitter: "admin,devops"
+                }
+            }
+        }
+
+        stage('🔍 Pre-deployment Check') {
+            steps {
+                script {
+                    echo "🔍 Checking system requirements..."
+                    sh """
+                        echo "✅ Running from Jenkins container"
+                        echo ""
+
+                        echo "🐳 Docker version:"
+                        docker --version || { echo "❌ Docker not accessible"; exit 1; }
+                        echo ""
+
+                        echo "📦 Docker Compose version:"
+                        docker compose version || { echo "❌ Docker Compose not accessible"; exit 1; }
+                        echo ""
+
+                        echo "💾 Disk space:"
+                        df -h / | tail -1
+                        echo ""
+
+                        echo "🔍 Available memory:"
+                        free -h
+                        echo ""
+                    """
+                }
+            }
+        }
+
+        stage('🔧 Prepare Deployment Directory') {
+            steps {
+                script {
+                    echo "🔧 Setting up deployment directory structure..."
+                    sh """
+                        # Create main deployment directory
+                        mkdir -p ${APP_PATH}
+                        mkdir -p ${DEPLOY_PATH}/backups
+
+                        echo "✅ Directory structure ready"
+                    """
+                }
+            }
+        }
+
+        stage('💾 Backup Current Deployment') {
+            when {
+                expression {
+                    return fileExists("${APP_PATH}/docker-compose.yml")
+                }
+            }
+            steps {
+                script {
+                    echo "💾 Creating backup of current deployment..."
+                    sh """
+                        BACKUP_NAME="backup_\$(date +%Y%m%d_%H%M%S)"
+                        BACKUP_PATH="${DEPLOY_PATH}/backups/\${BACKUP_NAME}"
+
+                        echo "📦 Creating backup: \${BACKUP_NAME}"
+                        cp -r ${APP_PATH} \${BACKUP_PATH}
+
+                        # Keep only last 5 backups
+                        cd ${DEPLOY_PATH}/backups
+                        ls -t | tail -n +6 | xargs -r rm -rf
+
+                        echo "✅ Backup created: \${BACKUP_PATH}"
+                        echo "📊 Backup size: \$(du -sh \${BACKUP_PATH} | cut -f1)"
+                    """
+                }
+            }
+        }
+
+        stage('🛑 Stop Existing Containers') {
+            steps {
+                script {
+                    echo "🛑 Stopping existing containers..."
+
+                    sh """
+                        # Check if app directory and docker-compose files exist
+                        if [ ! -d "${APP_PATH}" ] || [ ! -f "${APP_PATH}/docker-compose.yml" ]; then
+                            echo "ℹ️  No existing deployment found"
+                            exit 0
+                        fi
+
+                        cd ${APP_PATH}
+
+                        # Check if containers are running
+                        if docker compose ps -q 2>/dev/null | grep -q .; then
+                            echo "🛑 Stopping and removing containers..."
+                            docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} down --remove-orphans
+                            echo "✅ Containers stopped and removed"
+                        else
+                            echo "ℹ️  No containers running"
+                        fi
+                    """
+                }
+            }
+        }
+
+        stage('📤 Deploy Application Files') {
+            steps {
+                script {
+                    echo "📤 Deploying application files..."
+                    sh """
+                        echo "🗑️  Cleaning deployment directory..."
+                        rm -rf ${APP_PATH}/*
+
+                        echo "📦 Copying files from workspace to deployment directory..."
+                        cd ${WORKSPACE}
+
+                        # Use rsync for better control, fallback to tar if rsync not available
+                        if command -v rsync &> /dev/null; then
+                            echo "Using rsync..."
+                            rsync -av \
+                                --exclude='.git' \
+                                --exclude='node_modules' \
+                                --exclude='.env*' \
+                                --exclude='*.log' \
+                                --exclude='.jenkins' \
+                                --exclude='*@tmp' \
+                                --exclude='backups' \
+                                ./ ${APP_PATH}/
+                        else
+                            echo "Using tar..."
+                            tar --exclude='.git' \
+                                --exclude='node_modules' \
+                                --exclude='.env*' \
+                                --exclude='*.log' \
+                                --exclude='.jenkins' \
+                                --exclude='*@tmp' \
+                                --exclude='backups' \
+                                -cf - . | tar -xf - -C ${APP_PATH}/
+                        fi
+
+                        echo ""
+                        echo "✅ Files deployed to ${APP_PATH}"
+                        echo "📊 Deployment size: \$(du -sh ${APP_PATH} | cut -f1)"
+
+                        echo ""
+                        echo "🔍 Verifying critical files..."
+                        cd ${APP_PATH}
+                        ls -lh docker-compose*.yml ${ENV_FILE}
+                    """
+                }
+            }
+        }
+
+        stage('📝 Configure Environment') {
+            steps {
+                script {
+                    echo "📝 Configuring environment..."
+                    sh """
+                        cd ${APP_PATH}
+
+                        # Verify environment file exists
+                        if [ ! -f "${ENV_FILE}" ]; then
+                            echo "❌ Environment file not found: ${ENV_FILE}"
+                            echo "Available files:"
+                            ls -la .env*
+                            exit 1
+                        fi
+
+                        # Set proper permissions
+                        chmod 644 ${ENV_FILE}
+
+                        echo "✅ Environment configured for ${ENV_NAME}"
+                        echo "📄 Using: ${ENV_FILE}"
+                    """
+                }
+            }
+        }
+
+        stage('🐳 Build Docker Images') {
+            steps {
+                script {
+                    echo "🔨 Building Docker images..."
+                    sh """
+                        cd ${APP_PATH}
+
+                        echo "🐳 Building with: ${COMPOSE_FILES}"
+                        docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} build --no-cache
+
+                        echo "✅ Images built successfully"
+                    """
+                }
+            }
+        }
+
+        stage('🚀 Start Containers') {
+            steps {
+                script {
+                    echo "🚀 Starting Docker containers..."
+                    sh """
+                        cd ${APP_PATH}
+
+                        docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} up -d
+
+                        echo "✅ Containers started"
+                    """
+                }
+            }
+        }
+
+        stage('🏥 Health Check') {
+            steps {
+                script {
+                    echo "🏥 Performing health checks..."
+
+                    def maxAttempts = 30
+                    def checkInterval = 2
+                    def healthy = false
+
+                    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                        try {
+                            def result = sh(
+                                script: """
+                                    cd ${APP_PATH}
+                                    docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} ps --format json 2>/dev/null | grep -c '"State":"running"' || echo 0
+                                """,
+                                returnStdout: true
+                            ).trim()
+
+                            def runningCount = result.isInteger() ? result.toInteger() : 0
+
+                            if (runningCount > 0) {
+                                echo "✅ ${runningCount} container(s) running (attempt ${attempt}/${maxAttempts})"
+
+                                // Wait for stability
+                                if (attempt >= 5) {
+                                    healthy = true
+                                    echo "✅ Containers are stable and healthy"
+                                    break
+                                }
+                            } else {
+                                echo "⏳ Waiting for containers (attempt ${attempt}/${maxAttempts})..."
+                            }
+
+                            sleep checkInterval
+
+                        } catch (Exception e) {
+                            echo "⚠️  Health check attempt ${attempt}/${maxAttempts} failed: ${e.getMessage()}"
+                            sleep checkInterval
+                        }
+                    }
+
+                    if (!healthy) {
+                        echo "❌ Health check failed - containers not running properly"
+
+                        sh """
+                            cd ${APP_PATH}
+
+                            echo ""
+                            echo "🐳 Container status:"
+                            docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} ps
+
+                            echo ""
+                            echo "📋 Container logs:"
+                            docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} logs --tail=100
+                        """
+
+                        error("Health check failed - deployment unsuccessful")
+                    }
+                }
+            }
+        }
+
+        stage('🧪 Smoke Tests') {
+            steps {
+                script {
+                    echo "🧪 Running smoke tests..."
+                    sh """
+                        cd ${APP_PATH}
+
+                        echo "🔍 Checking container processes..."
+                        docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} ps
+
+                        echo ""
+                        echo "💻 Checking container resource usage..."
+                        docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" \
+                            \$(docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} ps -q)
+
+                        echo ""
+                        echo "✅ Smoke tests passed"
+                    """
+                }
+            }
+        }
+
+        stage('🧹 Cleanup') {
+            steps {
+                script {
+                    echo "🧹 Cleaning up unused Docker resources..."
+                    sh """
+                        echo "🗑️  Removing dangling images..."
+                        docker image prune -f
+
+                        echo "🗑️  Removing unused volumes..."
+                        docker volume prune -f
+
+                        echo "✅ Cleanup completed"
+                    """
+                }
+            }
+        }
+
+        stage('📊 Deployment Summary') {
+            steps {
+                script {
+                    sh """
+                        cd ${APP_PATH}
+
+                        echo ""
+                        echo "╔════════════════════════════════════════╗"
+                        echo "║       📊 DEPLOYMENT SUMMARY            ║"
+                        echo "╚════════════════════════════════════════╝"
+                        echo ""
+
+                        echo "📍 Environment: ${ENV_NAME.toUpperCase()}"
+                        echo "📁 Deployment Path: ${APP_PATH}"
+                        echo "🌿 Branch: ${env.BRANCH_NAME}"
+                        echo "🏗️  Build: #${env.BUILD_NUMBER}"
+                        echo ""
+
+                        echo "🐳 Running Containers:"
+                        docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} ps
+                        echo ""
+
+                        echo "📋 Recent Logs (last 20 lines):"
+                        docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} logs --tail=20
+                        echo ""
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                def duration = currentBuild.durationString.replace(' and counting', '')
+                echo """
+                ⏱️  Build Duration: ${duration}
+                📅 Completed: ${new Date()}
+                """
+            }
+        }
+
+        success {
+            script {
+                echo """
+                ╔════════════════════════════════════════╗
+                ║     🎉 DEPLOYMENT SUCCESSFUL           ║
+                ╚════════════════════════════════════════╝
+
+                Environment: ${ENV_NAME.toUpperCase()}
+                Branch: ${env.BRANCH_NAME}
+                Build: #${env.BUILD_NUMBER}
+                Path: ${APP_PATH}
+
+                ✅ All stages completed successfully
+                🐳 Docker containers are running
+
+                📋 Useful Commands:
+                ─────────────────────────────────────────
+                # Navigate to deployment
+                cd ${APP_PATH}
+
+                # View container status
+                docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} ps
+
+                # View logs
+                docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} logs -f
+
+                # Restart containers
+                docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} restart
+
+                # Stop containers
+                docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} down
+
+                ════════════════════════════════════════
+                """
+            }
+        }
+
+        failure {
+            script {
+                echo """
+                ╔════════════════════════════════════════╗
+                ║      ❌ DEPLOYMENT FAILED              ║
+                ╚════════════════════════════════════════╝
+
+                Environment: ${ENV_NAME.toUpperCase()}
+                Branch: ${env.BRANCH_NAME}
+                Build: #${env.BUILD_NUMBER}
+
+                🔍 Troubleshooting Steps:
+                ─────────────────────────────────────────
+                1. Check console output:
+                   ${env.BUILD_URL}console
+
+                2. Check container logs:
+                   cd ${APP_PATH}
+                   docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} logs
+
+                3. Check container status:
+                   docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} ps
+
+                4. Rollback to previous version:
+                   cd ${DEPLOY_PATH}/backups
+                   ls -lt
+                   # Copy the latest backup back to ${APP_PATH}
+
+                5. Check disk space:
+                   df -h
+
+                6. Check Docker status:
+                   docker ps -a
+                   docker system df
+
+                ════════════════════════════════════════
+                """
+            }
+        }
+
+        unstable {
+            script {
+                echo "⚠️  Build is unstable - please review the logs"
+            }
+        }
+
+        aborted {
+            script {
+                echo """
+                ⚠️  Deployment was aborted
+
+                The deployment process was manually stopped or timed out.
+                You may need to clean up manually:
+
+                cd ${APP_PATH}
+                docker compose -f ${COMPOSE_FILES} --env-file ${ENV_FILE} down
+                """
+            }
+        }
+    }
+}

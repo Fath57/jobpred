@@ -1,0 +1,40 @@
+enum ExperienceLevel {
+  JUNIOR
+  INTERMEDIATE
+  SENIOR
+  EXPERT
+}
+
+enum WorkMode {
+  REMOTE
+  HYBRID
+  IN_PERSON
+}
+
+enum FormalityLevel {
+  DECONTRACTE
+  PROFESSIONAL
+  FORMEL
+}
+
+enum OnboardingStep {
+  REGISTRATION
+  PERSONAL_INFO
+  WE_KNOW_YOU
+  PROFESSIONAL_INFO
+  CV_UPLOAD
+  JOB_DESCRIPTION
+  COMPLETED
+}
+
+enum OnboardingStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum UserRole {
+  CANDIDATE
+  RECRUITER
+  ADMIN
+}

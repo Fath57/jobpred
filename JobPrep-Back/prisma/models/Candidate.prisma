@@ -1,0 +1,23 @@
+model Candidate {
+  id                           String   @id @default(uuid())
+  userId                       String   @unique
+  fullName                     String
+  email                        String
+  phone                        String?
+  linkedin                     String?
+  location                     String?
+  aiProfileDescription         String
+  customizedProfileDescription String?
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+  completedAt                  DateTime?
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  // Un candidat peut avoir plusieurs job preferences (chacune avec son propre CV)
+  candidateJobPreferences CandidateJobPreference[]
+
+  @@map("candidates")
+}
+

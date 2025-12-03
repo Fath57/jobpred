@@ -1,0 +1,242 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ExperienceLevel {
+  JUNIOR
+  INTERMEDIATE
+  SENIOR
+  EXPERT
+}
+
+enum WorkMode {
+  REMOTE
+  HYBRID
+  IN_PERSON
+}
+
+enum FormalityLevel {
+  DECONTRACTE
+  PROFESSIONAL
+  FORMEL
+}
+
+enum OnboardingStep {
+  REGISTRATION
+  PERSONAL_INFO
+  WE_KNOW_YOU
+  PROFESSIONAL_INFO
+  CV_UPLOAD
+  JOB_DESCRIPTION
+  COMPLETED
+}
+
+enum OnboardingStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum UserRole {
+  CANDIDATE
+  RECRUITER
+  ADMIN
+}
+
+model AppFile {
+  id String @id @default(cuid())
+
+  // Champs demandés
+  name      String
+  extension String
+  size      BigInt
+  path      String  @unique
+  url       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  candidateJobPreferences CandidateJobPreference[]
+
+  @@map("app_files")
+}
+
+model Candidate {
+  id                           String    @id @default(uuid())
+  userId                       String    @unique
+  fullName                     String
+  email                        String
+  phone                        String?
+  linkedin                     String?
+  location                     String?
+  aiProfileDescription         String
+  customizedProfileDescription String?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+  completedAt                  DateTime?
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  // Un candidat peut avoir plusieurs job preferences (chacune avec son propre CV)
+  candidateJobPreferences CandidateJobPreference[]
+
+  @@map("candidates")
+}
+
+model CandidateJobPreference {
+  id              String           @id @default(uuid())
+  name            String?                // Nom généré par IA pour identifier la candidature
+  desiredPosition String
+  jobDescription  String?
+  experience      ExperienceLevel?
+  workMode        WorkMode?
+  formalityLevel  FormalityLevel?
+  isActive        Boolean          @default(false)  // Indique quelle candidature est active
+
+  // Relation vers le candidat (1 Candidat -> N JobPreference)
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  // Chaque job preference a son propre CV
+  cvId String?
+  cv   AppFile? @relation(fields: [cvId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([candidateId])
+  @@index([cvId])
+  @@map("candidate_job_preferences")
+}
+
+model OnboardingSession {
+  id             String           @id @default(uuid())
+  userId         String           @unique
+  currentStep    OnboardingStep   @default(REGISTRATION)
+  status         OnboardingStatus @default(IN_PROGRESS)
+  completedSteps Json             @default("[]")
+  data           Json             @default("{}")
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  completedAt    DateTime?
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("onboarding_sessions")
+}
+
+model Option {
+  id              String   @id @default(uuid())
+  name            String
+  description     String
+  amount          Float
+  code            String   @unique
+  isActive        Boolean  @default(true)
+  stripeProductId String?  @unique
+  stripePriceId   String?  @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  packOptions PackOption[]
+
+  @@map("options")
+}
+
+model Pack {
+  id              String   @id @default(uuid())
+  name            String
+  description     String
+  amount          Float
+  code            String   @unique
+  isActive        Boolean  @default(true)
+  stripeProductId String?  @unique
+  stripePriceId   String?  @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  packOptions PackOption[]
+
+  @@map("packs")
+}
+
+model PackOption {
+  id       String @id @default(uuid())
+  packId   String
+  optionId String
+  quantity Int    @default(1)
+
+  // Relations
+  pack   Pack   @relation(fields: [packId], references: [id], onDelete: Cascade)
+  option Option @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@unique([packId, optionId])
+  @@map("pack_options")
+}
+
+model Module {
+  id          String       @id @default(uuid())
+  name        String       @unique
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  permissions Permission[]
+
+  @@map("modules")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  moduleId    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  module      Module   @relation(fields: [moduleId], references: [id])
+  roles       Role[]   @relation("role_permissions")
+
+  @@map("permissions")
+}
+
+model Role {
+  id          String       @id @default(uuid())
+  name        String       @unique
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  permissions Permission[] @relation("role_permissions")
+  users       User[]
+
+  @@map("roles")
+}
+
+model User {
+  id                String             @id @default(uuid())
+  email             String             @unique
+  password          String
+  firstName         String
+  lastName          String
+  phone             String?
+  location          String?
+  isActive          Boolean            @default(true)
+  roleId            String
+  lastLoginAt       DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  linkedin          String?
+  candidate         Candidate?
+  onboardingSession OnboardingSession?
+  onboardingStep    Int?               @default(1)
+  role              Role               @relation(fields: [roleId], references: [id])
+
+  @@map("users")
+}
